@@ -1,2 +1,2 @@
-import { Workspace } from "../components/workspace";
-export default function Page() { return <Workspace />; }
+import { LocalConnection } from "../components/local-connection";
+export default function Page() { return <LocalConnection />; }
