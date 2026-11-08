@@ -56,3 +56,13 @@ Le build produit `apps/web/out` et copie l'export dans `out` à la racine pour l
 L'historique reste dans le navigateur, sous un identifiant local distinct de demo-local ; les correspondances FranceStudent sont persistées dans le dossier privé du compte OS. Un changement de contexte ou une nouvelle tentative explicite peut créer un nouveau chat distant. L'aperçu Sites reste statique et simulé. Cette livraison ne prétend pas activer le multi-utilisateur ni PostgreSQL.
 
 Voir docs/web/LOCAL_CONNECTION.md pour l'installation Mac et les limites de validation. Le protocole est testé hors ligne ; le test authentifié avec le compte du propriétaire doit se faire sur son Mac, car l'environnement cloud n'a pas accès au domaine FranceStudent et ne possède aucun secret de compte.
+
+## Réponses interactives et applications MCP
+
+Le propriétaire a confirmé que le chat FranceStudent fonctionne sur son Mac. La maquette des réponses interactives ordinateur/mobile a été approuvée. Les réponses enrichies automatiques ciblent la famille ChatGPT/OpenAI identifiée par métadonnées ; les outils sont proposés aux familles compatibles avec la grammaire contrôlée. Les autres modèles gardent leur présentation textuelle.
+
+Priorité bureautique : Google Drive, Gmail, Agenda, Outlook, OneDrive et Calendrier Microsoft, pour comptes personnels et professionnels. GitHub, Notion, Linear et Slack utilisent les MCP distants officiels. Les identifiants OAuth sont configurés une fois par l’administrateur ; les utilisateurs connectent ensuite leurs comptes via le consentement officiel. Les lectures sont automatiques après connexion, toutes les écritures nécessitent confirmation.
+
+Le serveur garde ses sessions personnelles locales et le coffre MCP chiffré, avec clé dans le Trousseau macOS. L’historique navigateur migre vers la version 2 ; PostgreSQL reste la cible future. Les sources CLI/TUI/Electron sont préservées. Aucun accès direct OpenAI n’est ajouté. La démonstration Sites existante reste statique et simulée ; cette étape ne change pas son déploiement.
+
+Voir docs/web/INTERACTIVE_MCP.md pour l’installation, la configuration des dix applications, les limites concrètes et le protocole. Les tests OAuth/MCP cloud utilisent des services de test ; l’activation des comptes externes réels et le Trousseau natif restent à vérifier sur Mac. L’authentification GitHub CLI est de nouveau disponible dans cet environnement au moment de cette livraison.

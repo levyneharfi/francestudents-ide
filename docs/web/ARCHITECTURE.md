@@ -47,3 +47,15 @@ Le serveur dérive userId de sa session opaque et ignore tout propriétaire ou c
 Le parser SSE reconnaît UTF-8 fragmenté, LF/CRLF, commentaires et données multilignes. L'événement completed du backend est obligatoire ; response.completed seul ne vaut pas confirmation de fin. 401 est relancé une fois avant flux, 429/409 et erreurs après début ne sont pas rejoués silencieusement. Une génération locale possède un requestId, une association à son propriétaire et une annulation. Les doublons de requestId sont refusés. La perte de connexion déclenche l'arrêt local et une tentative d'annulation distante.
 
 L'état courant de cette étape est documenté sans assimilation à un déploiement multi-utilisateur : voir LOCAL_CONNECTION.md.
+
+## Réponses structurées et MCP locaux
+
+Le contrat partagé ajoute AIEvent, ReplyBlock, ToolOperation, ReplySource et les états persistants des widgets. Le flux textuel reste compatible ; streamEvents porte les données typées. Un parser incrémental valide les clôtures fs-ui et fs-tool avant toute publication/exécution. Recharts, Mermaid et les composants React affichent les données ; Markdown/KaTeX prennent en charge le texte structuré. Aucun code du modèle n’est exécuté.
+
+L’orchestrateur ajoute la politique visuelle seulement aux modèles GPT/OpenAI confirmés par les métadonnées du catalogue. Il conserve un contexte d’outils borné et séparé des instructions, attend les confirmations d’écriture et limite chaque tour à cinq cycles. Les schémas des outils MCP distants sont recherchés à la demande avec describe_tools pour ne pas saturer le contexte. Un changement de modèle renouvelle le chat distant.
+
+ConnectorManager utilise des MCP internes par transport mémoire du SDK pour Google/Microsoft, et Streamable HTTP pour GitHub/Notion/Linear/Slack. Les connexions, la configuration et le registre des opérations sont chiffrés AES-GCM dans le dossier privé du propriétaire. La clé est conservée dans le Trousseau macOS ; l’environnement de test injecte une clé dédiée. Les propositions et décisions sont persistées avant exécution ; un résultat incertain n’est jamais relancé automatiquement. L’identité du compte externe local invalide les propositions en cas de reconnexion.
+
+Les retours OAuth localhost:4000 sont liés à l’état à usage unique de la session initiatrice, même si le cookie SameSite Strict n’arrive pas sur le retour externe. Le navigateur attend l’état serveur, sans dépendre des restrictions COOP des fenêtres du fournisseur. Toutes les autres routes exigent la session locale et les mutations contrôlent l’origine.
+
+Guide des routes, scopes et capacités : INTERACTIVE_MCP.md. La cible PostgreSQL/Prisma et le futur hébergement serveur restent inchangés.

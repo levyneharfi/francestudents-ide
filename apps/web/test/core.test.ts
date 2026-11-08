@@ -42,3 +42,7 @@ test("mock error preserves partial text and can be retried", async () => {
   let output = ""; for await (const chunk of new MockProvider(0).stream(request, { signal: new AbortController().signal })) output += chunk;
   assert.ok(output.startsWith(partial)); assert.ok(output.endsWith("?"));
 });
+test("v1 migration preserves messages and v2 restores validated widgets", () => {
+  const old = initialData();const raw = JSON.stringify({...old,version:1});const migrated=parseData(raw);assert.equal(migrated.version,2);assert.equal(migrated.conversations[0].messages[1].content,old.conversations[0].messages[1].content);
+  const message=migrated.conversations[0].messages[1];message.blocks=[{offset:0,block:{v:1,id:"list",kind:"checklist",title:"Notes",items:[{id:"one",label:"Relire"}]}}];message.widgets={list:{one:true}};assert.equal(parseData(JSON.stringify(migrated)).conversations[0].messages[1].widgets?.list.one,true);
+});

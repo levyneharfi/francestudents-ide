@@ -10,19 +10,28 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
+    "katex": "^0.19.1",
+    "lucide-react": "^0.468.0",
+    "mermaid": "^12.3.0",
     "next": "^16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "lucide-react": "^0.468.0"
+    "react-markdown": "^10.1.0",
+    "recharts": "^3.10.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@tailwindcss/postcss": "^4.1.0",
-    "tailwindcss": "^4.1.0",
-    "typescript": "^5.9.0",
+    "@types/katex": "^0.16.8",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.1.0",
     "tsx": "^4.20.0",
-    "@playwright/test": "^1.56.0"
+    "typescript": "^5.9.0"
   }
 }

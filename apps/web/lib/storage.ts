@@ -1,3 +1,4 @@
+import { validBlock, safeURL } from "../../../packages/francestudent-client/src/replies";
 import { type AppData, type Preferences, USER_ID, defaultPreferences, initialData } from "./domain";
 export const DATA_KEY = "francestudent:web:v1:data";
 export const PREFS_KEY = "francestudent:web:v1:appearance";
@@ -15,11 +16,19 @@ export function parseData(raw: string | null, userId = USER_ID): AppData {
   const owned = (x: Record<string, unknown>) => x && x.userId === userId && text(x.id);
   if (!raw) return initialData(userId);
   const d = JSON.parse(raw);
-  if (!d || d.version !== 1 || d.userId !== userId || !Array.isArray(d.conversations) || !Array.isArray(d.projects) || !Array.isArray(d.documents)) throw new Error("Sauvegarde locale incompatible.");
+  if (!d || ![1, 2].includes(d.version) || d.userId !== userId || !Array.isArray(d.conversations) || !Array.isArray(d.projects) || !Array.isArray(d.documents)) throw new Error("Sauvegarde locale incompatible.");
   if (!d.projects.every((p: Record<string, unknown>) => owned(p) && text(p.name) && text(p.instructions)) ||
       !d.documents.every((f: Record<string, unknown>) => owned(f) && text(f.name) && text(f.content) && typeof f.size === "number" && (f.projectId === null || text(f.projectId))) ||
       !d.conversations.every((c: Record<string, unknown>) => owned(c) && text(c.title) && text(c.modelId) && text(c.updatedAt) && typeof c.favorite === "boolean" && (c.projectId === null || text(c.projectId)) && Array.isArray(c.messages) && c.messages.every((m: Record<string, unknown>) => owned(m) && text(m.content) && (m.modelId === undefined || text(m.modelId)) && ["user", "assistant"].includes(String(m.role)) && ["complete", "streaming", "stopped", "error"].includes(String(m.status))))) throw new Error("Sauvegarde locale endommagée.");
   const result = d as AppData;
+  result.version = 2;
+  result.conversations.forEach(c => c.messages.forEach(m => {
+    m.blocks = Array.isArray(m.blocks) ? m.blocks.filter(p => p && Number.isInteger(p.offset) && p.offset >= 0 && p.offset <= m.content.length && validBlock(p.block)) : [];
+    m.sources = Array.isArray(m.sources) ? m.sources.filter(s => s && typeof s.id === "string" && typeof s.label === "string" && safeURL(s.url)) : [];
+    m.widgets = m.widgets && typeof m.widgets === "object" && !Array.isArray(m.widgets) ? Object.fromEntries(Object.entries(m.widgets).filter(([key, value]) => m.blocks!.some(p => p.block.id === key) && value && typeof value === "object" && Object.values(value).every(v => typeof v === "boolean" || typeof v === "string"))) : {};
+    // Confirmation state is always reconciled with the authenticated server before action.
+    m.operations = Array.isArray(m.operations) ? m.operations.filter(o => o && typeof o.id === "string" && typeof o.title === "string" && typeof o.appId === "string" && typeof o.tool === "string" && o.arguments && typeof o.arguments === "object" && ["pending", "running", "succeeded", "rejected", "failed", "uncertain"].includes(o.status)) : [];
+  }));
   result.conversations.forEach(c => c.messages.forEach(m => { if (m.status === "streaming") m.status = "stopped"; }));
   result.activeId = result.conversations.some(c => c.id === result.activeId) ? result.activeId : result.conversations[0]?.id ?? null;
   result.webSearch = result.webSearch === true;

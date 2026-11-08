@@ -42,3 +42,9 @@ Si un fork existe déjà, le vérifier avant réutilisation ; ne pas supprimer o
 ## Mise à jour après fourniture du contrat OpenAPI
 
 Le fork et la branche V1 sont vérifiés. Le propriétaire a demandé la connexion réelle en priorité, avec un premier test sur Mac. La livraison feat/francestudent-live-local implémente donc l'adaptateur, les sessions locales, le catalogue réel et le SSE avant la migration PostgreSQL. Les prochains jalons sont : test authentifié sur Mac via le guide LOCAL_CONNECTION.md ; puis persistance PostgreSQL/Prisma et autorisation multi-utilisateur ; enfin hébergement et intégrations avancées.
+
+## Étape réponses interactives et MCP
+
+Implémentation : protocole de composants et événements typés ; migration locale v2 ; rendu React/Recharts/Mermaid/KaTeX ; génération GPT automatique ; catalogue de dix applications ; coffre et OAuth ; MCP bureautiques internes et MCP distants ; confirmation des écritures et reprise du chat. Documentation : INTERACTIVE_MCP.md.
+
+Validation externe restante : configurer les clients OAuth sur le Mac puis tester les consentements, scopes, restrictions administrateur et opérations dans les vrais comptes du propriétaire. L’extension PostgreSQL/multi-utilisateur et l’hébergement connecté restent des étapes suivantes.
