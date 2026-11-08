@@ -2,19 +2,20 @@ import { type AppData, type Preferences, USER_ID, defaultPreferences, initialDat
 export const DATA_KEY = "francestudent:web:v1:data";
 export const PREFS_KEY = "francestudent:web:v1:appearance";
 export const isAccent = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
-export function parsePreferences(raw: string | null): Preferences {
+export function parsePreferences(raw: string | null, userId = USER_ID): Preferences {
   try {
     const p = JSON.parse(raw || "null");
-    if (!p || p.userId !== USER_ID) return { ...defaultPreferences };
-    return { userId: USER_ID, theme: ["dark", "light", "system"].includes(p.theme) ? p.theme : "dark", font: ["times", "georgia", "arial", "system"].includes(p.font) ? p.font : "times", accent: isAccent(p.accent) ? p.accent : null };
-  } catch { return { ...defaultPreferences }; }
+    if (!p || p.userId !== userId) return { ...defaultPreferences, userId };
+    return { userId, theme: ["dark", "light", "system"].includes(p.theme) ? p.theme : "dark", font: ["times", "georgia", "arial", "system"].includes(p.font) ? p.font : "times", accent: isAccent(p.accent) ? p.accent : null };
+  } catch { return { ...defaultPreferences, userId }; }
 }
 const text = (x: unknown): x is string => typeof x === "string";
-const owned = (x: Record<string, unknown>) => x && x.userId === USER_ID && text(x.id);
-export function parseData(raw: string | null): AppData {
-  if (!raw) return initialData();
+
+export function parseData(raw: string | null, userId = USER_ID): AppData {
+  const owned = (x: Record<string, unknown>) => x && x.userId === userId && text(x.id);
+  if (!raw) return initialData(userId);
   const d = JSON.parse(raw);
-  if (!d || d.version !== 1 || d.userId !== USER_ID || !Array.isArray(d.conversations) || !Array.isArray(d.projects) || !Array.isArray(d.documents)) throw new Error("Sauvegarde locale incompatible.");
+  if (!d || d.version !== 1 || d.userId !== userId || !Array.isArray(d.conversations) || !Array.isArray(d.projects) || !Array.isArray(d.documents)) throw new Error("Sauvegarde locale incompatible.");
   if (!d.projects.every((p: Record<string, unknown>) => owned(p) && text(p.name) && text(p.instructions)) ||
       !d.documents.every((f: Record<string, unknown>) => owned(f) && text(f.name) && text(f.content) && typeof f.size === "number" && (f.projectId === null || text(f.projectId))) ||
       !d.conversations.every((c: Record<string, unknown>) => owned(c) && text(c.title) && text(c.modelId) && text(c.updatedAt) && typeof c.favorite === "boolean" && (c.projectId === null || text(c.projectId)) && Array.isArray(c.messages) && c.messages.every((m: Record<string, unknown>) => owned(m) && text(m.content) && (m.modelId === undefined || text(m.modelId)) && ["user", "assistant"].includes(String(m.role)) && ["complete", "streaming", "stopped", "error"].includes(String(m.status))))) throw new Error("Sauvegarde locale endommagée.");
