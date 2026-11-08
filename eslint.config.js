@@ -18,6 +18,8 @@ module.exports = [
     {
         ignores: [
             "node_modules/**",
+            "apps/web/**",
+            "out/**",
             "dist/**",
             "release/**",
             "desktop/renderer/app.js",

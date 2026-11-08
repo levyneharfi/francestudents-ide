@@ -36,3 +36,11 @@ history.json
 package-lock.json
 AMELIORATIONS.md
 FRSTCLI.md
+
+# FranceStudent Web
+.next/
+out/
+test-results/
+playwright-report/
+!apps/web/package-lock.json
+*.tsbuildinfo
