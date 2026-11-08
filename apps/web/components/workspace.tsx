@@ -7,10 +7,13 @@ import { RemoteProvider } from "../lib/remote-provider";
 import type { AIModel } from "../../../packages/francestudent-client/src/contracts";
 import { models, MockProvider } from "../lib/mock-provider";
 import { useWorkspace } from "../lib/use-workspace";
+import { Applications } from "./applications";
+import { RichMessage, ToolCard } from "./replies/message";
+import type { ToolOperation, WidgetState } from "../../../packages/francestudent-client/src/replies";
 import { Appearance } from "./appearance";
 import { Modal } from "./modal";
 
-type Dialog = { kind: "appearance" | "library" | "project" | "rename" | "delete" | "document" | "tools" | "reset"; id?: string } | null;
+type Dialog = { kind: "appearance" | "library" | "project" | "rename" | "delete" | "document" | "tools" | "reset" | "applications"; id?: string } | null;
 const connected = process.env.NEXT_PUBLIC_FS_CONNECTED === "true";
 const provider = connected ? new RemoteProvider() : new MockProvider();
 
@@ -30,7 +33,7 @@ function Panel({ side, mobile, title, onClose, children }: { side: "left" | "rig
     function key(e: KeyboardEvent) {
       if (e.key === "Escape") { e.preventDefault(); closeRef.current(); }
       if (e.key === "Tab") {
-        const items = [...panel.querySelectorAll<HTMLElement>('button:not(:disabled),input,select,textarea,[tabindex="0"]')].filter(x => x.getClientRects().length);
+        const items = [...panel.querySelectorAll<HTMLElement>('button:not(:disabled),input,select,textarea,[tabindex="0"],a[href],summary')].filter(x => x.getClientRects().length);
         if (e.shiftKey && document.activeElement === items[0]) { e.preventDefault(); items.at(-1)?.focus(); }
         else if (!e.shiftKey && document.activeElement === items.at(-1)) { e.preventDefault(); items[0]?.focus(); }
       }
@@ -85,6 +88,19 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
   useEffect(() => {
     if (follow.current && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, [active?.messages, data.activeId]);
+  useEffect(() => {
+    if (!connected || !ready || !active?.id || busy) return;
+    const abort=new AbortController();
+    fetch(`/api/tool-operations?conversationId=${encodeURIComponent(active.id)}`,{signal:abort.signal,cache:"no-store"}).then(async response=>{
+      if(!response.ok)return;const value=await response.json();if(abort.signal.aborted)return;
+      const operations=value.operations as ToolOperation[];if(!operations?.length)return;
+      changeConversation(active.id,c=>{
+        const seen=new Set(c.messages.flatMap(m=>m.operations?.map(o=>o.id)||[]));const missing=operations.filter(o=>!seen.has(o.id));
+        const lastAssistant=c.messages.length-1-[...c.messages].reverse().findIndex(m=>m.role==="assistant");
+        return {...c,messages:c.messages.map((m,i)=>({...m,operations:[...(m.operations || []).map(o=>operations.find(current=>current.id===o.id)||o),...(i===lastAssistant?missing:[])]}))};
+      });
+    }).catch(()=>{});return()=>abort.abort();
+  },[data.activeId,ready,busy]);
   useEffect(() => { follow.current = true; }, [data.activeId]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -126,20 +142,42 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
     setBusy(c.id); setDraft(""); follow.current = true;
     const updateMessage = (fn: (m: Message) => Message) => changeConversation(c.id, conversation => ({ ...conversation, messages: conversation.messages.map(m => m.id === assistant.id ? fn(m) : m) }));
     try {
-      for await (const chunk of provider.stream({
+      for await (const chunk of provider.streamEvents({
         userId, conversationId: c.id, modelId: c.modelId,
-        messages: history.map(m => ({ role: m.role, content: m.content })),
+        messages: history.map(m => ({ role: m.role, content: [m.content, m.blocks?.length ? `PRÉSENTATION ANTÉRIEURE (données) : ${JSON.stringify(m.blocks.map(p=>p.block))}` : "", m.widgets && Object.keys(m.widgets).length ? `ÉTAT MANUEL DE L’INTERFACE (déclaré par l’utilisateur, pas une vérification d’outil) : ${JSON.stringify(m.widgets)}` : ""].filter(Boolean).join("\n\n") })),
         projectInstructions: data.projects.find(p => p.id === c.projectId)?.instructions,
         documents: data.documents.filter(f => !f.projectId || f.projectId === c.projectId).map(f => ({ name: f.name, content: f.content })),
         webSearch: data.webSearch,
         ...(connected ? { fresh: !!retryId } : {})
-      }, { signal: nextController.signal })) updateMessage(m => ({ ...m, content: m.content + chunk }));
+      }, { signal: nextController.signal })) {
+        updateMessage(m => {
+          if (chunk.type === "text") return { ...m, content: m.content + chunk.text };
+          if (chunk.type === "block") return { ...m, blocks: [...m.blocks || [], {block:chunk.block,offset:chunk.offset}] };
+          if (chunk.type === "source") return { ...m, sources: [...(m.sources || []).filter(s=>s.id!==chunk.source.id),chunk.source] };
+          if (chunk.type === "tool") return { ...m, operations: [...(m.operations || []).filter(o=>o.id!==chunk.operation.id),chunk.operation] };
+          return m;
+        });
+      }
       updateMessage(m => ({ ...m, status: "complete" }));
     } catch (error) {
       const aborted = nextController.signal.aborted;
       updateMessage(m => ({ ...m, status: aborted ? "stopped" : "error" }));
       if (!aborted) setNotice(error instanceof Error ? error.message : "La réponse n’a pas pu aboutir. Réessayez.");
     } finally { if (controller.current === nextController) { controller.current = null; setBusy(null); } }
+  }
+  function updateWidget(conversationId: string, messageId: string, blockId: string, state: WidgetState) {
+    changeConversation(conversationId, c=>({...c,messages:c.messages.map(m=>m.id===messageId?{...m,widgets:{...m.widgets,[blockId]:state}}:m)}));
+  }
+  async function decideOperation(operation: ToolOperation, approved: boolean) {
+    if (!active || busy) return;
+    try {
+      const response=await fetch(`/api/tool-operations/${operation.id}/decision`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({approved})});
+      const value=await response.json(); if(!response.ok)throw new Error(value.error || "L’action n’a pas pu aboutir.");
+      changeConversation(active.id,c=>({...c,messages:c.messages.map(m=>({...m,operations:m.operations?.map(o=>o.id===operation.id?value.operation:o)}))}));
+      if(["succeeded","rejected","failed","uncertain"].includes(value.operation.status)) {
+        await generate({...active,messages:active.messages.map(m=>({...m,operations:m.operations?.map(o=>o.id===operation.id?value.operation:o)}))}, `${approved?"J’ai confirmé":"J’ai refusé"} l’action « ${operation.title} ». Poursuis à partir de son résultat serveur, sans répéter cette action.`);
+      }
+    } catch(e){setNotice(e instanceof Error?e.message:"Action indisponible.");}
   }
   function send() {
     if (!draft.trim() || busy || !ready || !availableModels.length) return;
@@ -161,7 +199,7 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
   const tools = <div className="tools-content">
     <div className="tool-row"><span className="tool-icon"><Globe size={18} /></span><div><strong>Recherche web</strong><p>{connected ? "Recherche par FranceStudent" : "Simulation · aucune requête externe"}</p></div><button className={`switch ${data.webSearch ? "on" : ""}`} role="switch" aria-checked={data.webSearch} aria-label={connected ? "Recherche web FranceStudent" : "Recherche web simulée"} onClick={() => setData(d => ({ ...d, webSearch: !d.webSearch }))}><span /></button></div>
     <div className="tool-row"><span className="tool-icon"><FileText size={18} /></span><div><strong>Documents locaux</strong><p>Texte et Markdown · disponibles</p></div><Check size={15} className="muted" /></div>
-    <div className="tool-row"><span className="tool-icon"><Box size={18} /></span><div><strong>Intégrations MCP</strong><p>À venir</p></div><span className="pill">Bientôt</span></div>
+    <div className="tool-row"><span className="tool-icon"><Box size={18} /></span><div><strong>Intégrations MCP</strong><p>{connected ? "Applications connectées et confirmations" : "Bibliothèque en aperçu simulé"}</p></div><button className="text-button" onClick={() => openDialog({kind:"applications"})}>Ouvrir</button></div>
     <p className="field-note">{connected ? "La recherche est effectuée par FranceStudent. Le texte des documents du contexte est transmis lors de l’envoi du message." : "Les outils de cette démonstration n’accèdent ni à Internet ni aux fichiers de votre appareil sans sélection explicite."}</p>
   </div>;
 
@@ -173,6 +211,7 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
         <div className="search-box"><Search size={16} /><input ref={searchRef} aria-label="Rechercher des conversations" placeholder="Rechercher" value={query} onChange={e => setQuery(e.target.value)} /><kbd>⌘ K</kbd></div>
         <nav className="primary-nav" aria-label="Espace personnel">
           <button onClick={() => openDialog({ kind: "library" })}><Library size={18} />Bibliothèque<span className="nav-count">{data.documents.length}</span></button>
+          <button onClick={() => openDialog({kind:"applications"})}><Box size={18}/>Applications</button>
           <button className={filter === "favorites" ? "active-nav" : ""} aria-pressed={filter === "favorites"} onClick={() => setFilter(v => v === "all" ? "favorites" : "all")}><Star size={18} />Favoris<span className="nav-count">{data.conversations.filter(c => c.favorite).length || ""}</span></button>
         </nav>
         <div className="nav-section projects-section"><div className="section-label"><span>PROJETS</span><IconButton label="Créer un projet" onClick={() => openDialog({ kind: "project" })}><Plus size={15} /></IconButton></div>
@@ -194,9 +233,9 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
         {(notice || storageError) && <div className="notice" role="status"><span>{notice || storageError}</span>{notice ? <IconButton label="Fermer la notification" onClick={() => setNotice("")}><X size={14} /></IconButton> : corrupt ? <button className="text-button" onClick={() => openDialog({ kind: "reset" })}>Réinitialiser</button> : null}</div>}
         <div className="conversation-heading"><span><Folder size={13} />{project?.name || "Espace personnel"}<span className="breadcrumb-slash">/</span><span className="heading-title">{active?.title || "Nouvelle conversation"}</span></span>{active && <div><IconButton label="Renommer la conversation" onClick={() => openDialog({ kind: "rename", id: active.id })}><Pencil size={14} /></IconButton><IconButton label="Supprimer la conversation" onClick={() => openDialog({ kind: "delete", id: active.id })}><Trash2 size={14} /></IconButton></div>}</div>
         <div className="message-scroller" ref={scroller} onScroll={() => { const el = scroller.current; if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 110; }}>
-          {!active?.messages.length ? <div className="welcome"><span className="welcome-symbol">f.</span><span className="eyebrow">VOTRE ESPACE DE RÉFLEXION</span><h1>Une idée.<br />Et tout commence.</h1><p>Explorez une question, donnez forme à vos pensées.<br />Cet espace est le vôtre.</p><div className="suggestions">{["Construire un plan", "Explorer une idée", "Organiser mes notes"].map((text, i) => <button key={text} onClick={() => { setDraft(["Aide-moi à construire un plan pour mon mémoire.", "Comment explorer une nouvelle idée ?", "Aide-moi à organiser mes notes."][i]); textarea.current?.focus(); }}>{text}<ArrowUpRight size={15} /></button>)}</div></div> : <div className="messages" aria-label="Messages de la conversation">{active.messages.map((message, index) => <article key={message.id} className={`message ${message.role}`} aria-label={message.role === "user" ? "Message envoyé" : connected ? "Réponse FranceStudent" : "Réponse simulée"}>
+          {!active?.messages.length ? <div className="welcome"><span className="welcome-symbol">f.</span><span className="eyebrow">VOTRE ESPACE DE RÉFLEXION</span><h1>Une idée.<br />Et tout commence.</h1><p>Explorez une question, donnez forme à vos pensées.<br />Cet espace est le vôtre.</p><div className="suggestions">{["Construire un plan", "Explorer une idée", "Organiser mes notes", "Préparer ma semaine"].map((text, i) => <button key={text} onClick={() => { setDraft(["Aide-moi à construire un plan pour mon mémoire.", "Comment explorer une nouvelle idée ?", "Aide-moi à organiser mes notes.", "Aide-moi à préparer ma semaine."][i]); textarea.current?.focus(); }}>{text}<ArrowUpRight size={15} /></button>)}</div></div> : <div className="messages" aria-label="Messages de la conversation">{active.messages.map((message, index) => <article key={message.id} className={`message ${message.role}`} aria-label={message.role === "user" ? "Message envoyé" : connected ? "Réponse FranceStudent" : "Réponse simulée"}>
             <div className={`message-avatar ${message.role === "assistant" ? "assistant-avatar" : ""}`}>{message.role === "user" ? "L" : "f."}</div>
-            <div className="message-content"><div className="message-byline"><strong>{message.role === "user" ? "Vous" : modelName(message.modelId || active.modelId)}</strong>{message.role === "assistant" && <span>{connected ? "FRANCESTUDENT" : "SIMULATION"}</span>}</div><div className="message-text">{message.content ? message.content.split("\n\n").map((paragraph, n) => <p key={n}>{paragraph}</p>) : message.status === "streaming" ? <span className="thinking"><i /><i /><i /><span className="sr-only">Réponse en cours</span></span> : <p className="muted">La réponse a été arrêtée.</p>}{message.status === "streaming" && message.content && <span className="stream-cursor" />}</div>
+            <div className="message-content"><div className="message-byline"><strong>{message.role === "user" ? "Vous" : modelName(message.modelId || active.modelId)}</strong>{message.role === "assistant" && <span>{connected ? "FRANCESTUDENT" : "SIMULATION"}</span>}</div><div className="message-text">{message.content || message.blocks?.length || message.operations?.length ? <>{message.role === "assistant" ? <RichMessage message={message} disabled={!!busy} onState={(blockId,state)=>updateWidget(active.id,message.id,blockId,state)} onSubmit={(text,blockId,state)=>{if(!busy)void generate({...active,messages:active.messages.map(m=>m.id===message.id?{...m,widgets:{...m.widgets,[blockId]:state}}:m)},text);}}/> : <p>{message.content}</p>}{message.operations?.map(operation=><ToolCard key={operation.id} operation={operation} disabled={!!busy || !connected} onDecide={approved=>decideOperation(operation,approved)}/>)}</> : message.status === "streaming" ? <span className="thinking"><i /><i /><i /><span className="sr-only">Réponse en cours</span></span> : <p className="muted">La réponse a été arrêtée.</p>}{message.status === "streaming" && message.content && <span className="stream-cursor" />}</div>
             {message.role === "assistant" && message.status !== "streaming" && <div className="message-actions"><IconButton label="Copier la réponse" onClick={() => { navigator.clipboard.writeText(message.content).then(() => setNotice("Réponse copiée.")).catch(() => setNotice("La copie n’est pas disponible dans ce navigateur.")); }}><Copy size={14} /></IconButton>{message.status === "stopped" && <span className="muted">Réponse arrêtée</span>}{message.status === "error" && <span className="muted">Réponse interrompue</span>}{index === active.messages.length - 1 && ["error", "stopped"].includes(message.status) && <button className="text-button" disabled={!!busy} onClick={() => void generate(active, undefined, message.id)}><RotateCcw size={13} />Réessayer</button>}</div>}</div>
           </article>)}</div>}
         </div>
@@ -214,7 +253,7 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
           <section className="context-section"><label className="context-label" htmlFor="project-instructions">Instructions du projet <Pencil size={13} /></label>{project ? <><textarea id="project-instructions" className="instructions" value={project.instructions} placeholder="Comment souhaitez-vous être accompagné ?" maxLength={6000} disabled={!!busy} onChange={e => { const value = e.target.value; setData(d => ({ ...d, projects: d.projects.map(p => p.id === project.id ? { ...p, instructions: value } : p) })); }} /><span className="autosave-label"><Check size={11} />Enregistrées sur cet appareil</span></> : <p className="field-note">Choisissez un projet pour définir ses instructions.</p>}</section>
           <section className="context-section"><div className="section-label"><span>FICHIERS <span className="count">{documents.length}</span></span><IconButton label="Ajouter un document" disabled={importing} onClick={() => fileRef.current?.click()}><Plus size={15} /></IconButton></div><div className="context-files">{documents.map(doc => <button key={doc.id} className="file-item" onClick={() => openDialog({ kind: "document", id: doc.id })}><span className="file-icon"><FileText size={18} /></span><span><strong>{doc.name}</strong><small>{Math.max(1, Math.ceil(doc.size / 1024))} Ko · Local</small></span><ArrowUpRight size={13} /></button>)}{!documents.length && <p className="empty-small">Ajoutez vos premières notes au format .txt ou .md.</p>}</div><button className="library-link" onClick={() => openDialog({ kind: "library" })}>Ouvrir la bibliothèque<ArrowUpRight size={13} /></button></section>
           <section className="context-section compact-tool"><Globe size={17} /><div><strong>Recherche web</strong><span>{connected ? (data.webSearch ? "Activée sur FranceStudent" : "Désactivée") : (data.webSearch ? "Simulation activée" : "Simulation désactivée")}</span></div><button className={`switch ${data.webSearch ? "on" : ""}`} role="switch" aria-checked={data.webSearch} aria-label={connected ? "Recherche web FranceStudent" : "Recherche web simulée"} onClick={() => setData(d => ({ ...d, webSearch: !d.webSearch }))}><span /></button></section>
-          <section className="context-section compact-tool"><Box size={17} /><div><strong>Intégrations MCP</strong><span>Un espace pour vos futurs outils</span></div><span className="pill">À venir</span></section>
+          <section className="context-section compact-tool"><Box size={17} /><div><strong>Intégrations MCP</strong><span>{connected ? "Vos applications et leurs autorisations" : "Catalogue en démonstration"}</span></div><button className="text-button" onClick={()=>openDialog({kind:"applications"})}>Ouvrir</button></section>
           {connected && <p className="field-note">Le texte des fichiers du contexte sera transmis à FranceStudent lors de votre prochain envoi.</p>}
           <section className="memory-note"><BookOpen size={16} /><div><strong>Votre contexte, au même endroit.</strong><p>Les fichiers et instructions restent associés à votre espace local.</p></div></section>
         </div>}</div>
@@ -223,6 +262,7 @@ export function Workspace({ userId = USER_ID, onLogout }: { userId?: string; onL
     </div>
     <input ref={fileRef} className="sr-only" tabIndex={-1} type="file" accept=".txt,.md,text/plain,text/markdown" aria-label="Importer un document" onChange={e => void importFile(e.target.files?.[0])} />
     <div className="sr-only" role="status" aria-live="polite">{busy ? "Réponse en cours" : "Prêt"}</div>
+    {dialog?.kind === "applications" && <Applications connected={connected} onClose={()=>setDialog(null)}/>}
     {dialog?.kind === "appearance" && <Appearance preferences={preferences} onChange={setPreferences} onClose={() => setDialog(null)} />}
     {dialog?.kind === "tools" && <Modal title="Vos outils" onClose={() => setDialog(null)}>{tools}</Modal>}
     {dialog?.kind === "project" && <Modal title="Nouveau projet" onClose={() => setDialog(null)}><form className="stack-form" onSubmit={e => { e.preventDefault(); if (!projectName.trim()) return; const p = { id: id(), userId, name: projectName.trim(), instructions: projectInstructions.trim() }; const c = makeConversation(p.id); setData(d => ({ ...d, projects: [...d.projects, p], activeId: c.id, conversations: [c, ...d.conversations] })); setDialog(null); }}><p className="muted">Rassemblez vos conversations autour d’une même idée.</p><label>Nom du projet<input data-autofocus required maxLength={80} placeholder="Un nouveau chapitre…" value={projectName} onChange={e => setProjectName(e.target.value)} /></label><label>Instructions personnalisées<textarea maxLength={6000} rows={4} placeholder="Précisez l’objectif, le style ou les contraintes du projet." value={projectInstructions} onChange={e => setProjectInstructions(e.target.value)} /></label><div className="form-actions"><button type="button" className="secondary-button" onClick={() => setDialog(null)}>Annuler</button><button className="accent-button" disabled={!projectName.trim()}>Créer le projet</button></div></form></Modal>}

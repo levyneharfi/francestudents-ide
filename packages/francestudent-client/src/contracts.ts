@@ -1,5 +1,6 @@
 /** Browser-safe types. Authenticated implementations must remain server-only. */
-export interface AIModel { id: string; name: string; description: string }
+import type { AIEvent } from "./replies";
+export interface AIModel { id: string; name: string; description: string; provider?: string; model?: string; richResponses?: boolean; tools?: boolean }
 export interface AICapabilities { streaming: boolean; webSearch: boolean; documents: boolean; tools: boolean; simulated: boolean }
 export interface AIRequest {
   userId: string;
@@ -11,6 +12,7 @@ export interface AIRequest {
   webSearch: boolean;
 }
 export interface AIProvider {
+  streamEvents?(request: AIRequest, options: { signal: AbortSignal }): AsyncIterable<AIEvent>;
   readonly capabilities: AICapabilities;
   listModels(): readonly AIModel[] | Promise<readonly AIModel[]>;
   stream(request: AIRequest, options: { signal: AbortSignal }): AsyncIterable<string>;

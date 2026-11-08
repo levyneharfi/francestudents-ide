@@ -4,6 +4,10 @@ import { LocalStore, type Owner, verifyPassword } from "./store";
 import { FranceStudentClient, ProviderError } from "../../../packages/francestudent-client/src/server";
 import type { AIRequest } from "../../../packages/francestudent-client/src/contracts";
 
+import { ConnectorManager } from "./connectors/manager";
+import { ConnectorError } from "./connectors/http";
+import { orchestrate } from "./orchestrator";
+
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 const uuid = (s: unknown): s is string => typeof s === "string" && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(s);
 class HTTPError extends Error { constructor(public status: number, message: string) { super(message); } }
@@ -24,13 +28,15 @@ function validateChat(value: Record<string, unknown>, userId: string): AIRequest
   if (value.documents !== undefined && (!Array.isArray(value.documents) || value.documents.length > 30 || !value.documents.every(d => d && typeof d.name === "string" && d.name.length <= 255 && typeof d.content === "string" && d.content.length <= 262144))) throw new HTTPError(400, "Documents invalides.");
   return { userId, conversationId: value.conversationId, requestId: value.requestId, fresh: value.fresh === true, modelId: value.modelId, messages, projectInstructions: value.projectInstructions as string | undefined, documents: value.documents as AIRequest["documents"], webSearch: value.webSearch === true };
 }
-export async function createLocalServer(options: { store?: LocalStore; client?: FranceStudentClient; origin?: string } = {}) {
+export async function createLocalServer(options: { store?: LocalStore; client?: FranceStudentClient; origin?: string; connectors?: ConnectorManager } = {}) {
   const store = options.store || new LocalStore();
   const owner = await store.read<Owner>("owner.json");
   if (!uuid(owner.userId)) throw new Error("Compte local invalide. Lancez npm run setup.");
   const client = options.client || new FranceStudentClient({ loadSession: () => store.session(), saveSession: value => store.write("session.json", value) });
   const origin = options.origin || "http://127.0.0.1:3000";
   const sessions = new Map<string, number>(), attempts: number[] = [], recentRequests = new Map<string, number>();
+  const connectors = options.connectors || new ConnectorManager(store, owner.userId, { sessionActive: id => (sessions.get(id) || 0) > Date.now() });
+  const toolControllers = new Set<AbortController>();
   const active = new Map<string, { controller: AbortController; conversationId: string }>();
   let mappings: Record<string, { userId: string; accountId: number; remoteId: string; context: string }>;
   try { mappings = await store.read("chats.json"); }
@@ -58,13 +64,42 @@ export async function createLocalServer(options: { store?: LocalStore; client?: 
         res.setHeader("Set-Cookie", `fs_web_session=${value}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=43200`);
         return json(res, 200, { authenticated: true, userId: owner.userId });
       }
+      if (path.startsWith("/api/connectors/oauth/callback/") && req.method === "GET") {
+        const query = new URL(req.url || "/", "http://localhost").searchParams;
+        let success = false;
+        try { await connectors.complete(path.split("/").at(-1)!, query.get("state") || "", query.get("code") || undefined, query.get("error") || undefined); success = true; } catch {}
+        res.writeHead(success ? 200 : 400, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", "Referrer-Policy": "no-referrer" });
+        return res.end(`<!doctype html><html lang="fr"><meta charset="utf-8"><title>Connexion d’application</title><body><h1>${success ? "Application connectée" : "Connexion refusée ou expirée"}</h1><p>Vous pouvez fermer cette fenêtre et revenir à FranceStudent Web. ${success ? "" : "Relancez la connexion depuis Applications et vérifiez les permissions."}</p></body></html>`);
+      }
       if (!authenticated) return json(res, 401, { error: "Connectez-vous à votre espace local." });
       if (path === "/api/session" && req.method === "DELETE") {
         sessions.delete(digest(token));
         for (const generation of active.values()) generation.controller.abort();
+        for (const controller of toolControllers) controller.abort();
         res.setHeader("Set-Cookie", "fs_web_session=; Path=/api; HttpOnly; SameSite=Strict; Max-Age=0"); return json(res, 200, { authenticated: false });
       }
-      if (path === "/api/models" && req.method === "GET") return json(res, 200, { models: await client.listModels(), capabilities: client.capabilities });
+      if (path === "/api/connectors" && req.method === "GET") return json(res, 200, { apps: await connectors.catalog() });
+      if (path === "/api/tool-operations" && req.method === "GET") {
+        const conversationId = new URL(req.url || "/", "http://localhost").searchParams.get("conversationId") || undefined;
+        if (conversationId && !uuid(conversationId)) throw new HTTPError(400, "Conversation invalide.");
+        return json(res, 200, { operations: await connectors.operations(conversationId) });
+      }
+      const connectorRoute = /^\/api\/connectors\/([a-z-]+)(?:\/(connect|discover|cancel))?$/.exec(path);
+      if (connectorRoute) {
+        if (req.method === "POST" && connectorRoute[2] === "connect") return json(res, 200, await connectors.start(connectorRoute[1], digest(token)));
+        if (req.method === "POST" && connectorRoute[2] === "cancel") return json(res, 200, connectors.cancel(connectorRoute[1], digest(token)));
+        if (req.method === "POST" && connectorRoute[2] === "discover") return json(res, 200, { tools: await connectors.discover(connectorRoute[1]) });
+        if (req.method === "DELETE" && !connectorRoute[2]) return json(res, 200, await connectors.disconnect(connectorRoute[1]));
+      }
+      const approval = /^\/api\/tool-operations\/([a-f0-9-]+)\/decision$/.exec(path);
+      if (approval && req.method === "POST") {
+        const value = await body(req); if (typeof value.approved !== "boolean") throw new HTTPError(400, "Décision invalide.");
+        const controller = new AbortController(); res.on("close", () => { if (!res.writableEnded) controller.abort(); });
+        toolControllers.add(controller);
+        try { return json(res, 200, await connectors.decide(approval[1], value.approved, controller.signal)); }
+        finally { toolControllers.delete(controller); }
+      }
+      if (path === "/api/models" && req.method === "GET") return json(res, 200, { models: await client.listModels(), capabilities: { ...client.capabilities, tools: true } });
       if (path === "/api/chat/cancel" && req.method === "POST") {
         const input = await body(req); if (typeof input.requestId !== "string") throw new HTTPError(400, "Génération invalide.");
         active.get(input.requestId)?.controller.abort(); return json(res, 200, { stopped: true });
@@ -80,28 +115,33 @@ export async function createLocalServer(options: { store?: LocalStore; client?: 
       try {
         const account = await client.profile();
         if (generation.controller.signal.aborted) { json(res, 409, { error: "Réponse arrêtée." }); return; }
-        const context = digest(JSON.stringify({ instructions: input.projectInstructions || "", documents: input.documents || [] }));
+        const model = (await client.listModels()).find(m => m.id === input.modelId);
+        if (!model) throw new HTTPError(400, "Modèle indisponible.");
+        const context = digest(JSON.stringify({ protocol: 2, modelId: input.modelId, instructions: input.projectInstructions || "", documents: input.documents || [] }));
         const previous = mappings[input.conversationId];
         const remoteId = !input.fresh && previous?.userId === owner.userId && previous.accountId === account.id && previous.context === context ? previous.remoteId : undefined;
         res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
         const event = (name: string, value: unknown) => { if (!res.destroyed) res.write(`event: ${name}\ndata: ${JSON.stringify(value)}\n\n`); };
         event("meta", { requestId: input.requestId });
-        for await (const delta of client.stream(input, { signal: generation.controller.signal, chatId: remoteId, onChatId: async remoteId => {
+        await orchestrate({ client, manager: connectors, input, model, signal: generation.controller.signal, chatId: remoteId, emit: value => {
+          if (value.type === "text") event("delta", { text: value.text });
+          else if (value.type === "done") event("done", {});
+          else event(value.type, value);
+        }, onChatId: async remoteId => {
           if (!uuid(remoteId)) throw new ProviderError("INVALID_CHAT", "Identifiant de conversation FranceStudent invalide.");
           mappings[input.conversationId] = { userId: owner.userId, accountId: account.id, remoteId, context };
           await store.write("chats.json", mappings);
-        } })) event("delta", { text: delta });
-        event("done", {});
+        } });
       } catch (error) {
         if (res.headersSent && !res.destroyed) res.write(`event: error\ndata: ${JSON.stringify({ code: generation.controller.signal.aborted ? "STOPPED" : error instanceof ProviderError ? error.code : "SERVER_ERROR", error: generation.controller.signal.aborted ? "Réponse arrêtée." : error instanceof ProviderError ? error.message : "La réponse n’a pas pu aboutir." })}\n\n`);
         else if (!res.headersSent) throw error;
       } finally { active.delete(input.requestId); if (res.headersSent && !res.writableEnded) res.end(); }
     } catch (error) {
       if (res.headersSent) return res.end();
-      const status = error instanceof HTTPError ? error.status : error instanceof ProviderError ? error.status : 500;
-      json(res, status, { error: error instanceof HTTPError || error instanceof ProviderError ? error.message : "Erreur du serveur local. Vérifiez la configuration dans le Terminal." });
+      const status = error instanceof HTTPError ? error.status : error instanceof ProviderError ? error.status : error instanceof ConnectorError ? 400 : 500;
+      json(res, status, { error: error instanceof HTTPError || error instanceof ProviderError || error instanceof ConnectorError ? error.message : "Erreur du serveur local. Vérifiez la configuration dans le Terminal." });
     }
   });
-  server.on("close", () => { for (const g of active.values()) g.controller.abort(); sessions.clear(); });
+  server.on("close", () => { for (const g of active.values()) g.controller.abort(); for (const controller of toolControllers) controller.abort(); sessions.clear(); });
   return server;
 }

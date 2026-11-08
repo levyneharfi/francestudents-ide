@@ -1,3 +1,4 @@
+import type { PositionedBlock, ReplySource, ToolOperation, WidgetState } from "../../../packages/francestudent-client/src/replies";
 export const USER_ID = "demo-local";
 export type Theme = "dark" | "light" | "system";
 export type Font = "times" | "georgia" | "arial" | "system";
@@ -5,6 +6,7 @@ export interface Preferences { userId: string; theme: Theme; font: Font; accent:
 export interface Message {
   id: string; userId: string; role: "user" | "assistant"; content: string;
   status: "complete" | "streaming" | "stopped" | "error"; modelId?: string;
+  blocks?: PositionedBlock[]; widgets?: Record<string, WidgetState>; sources?: ReplySource[]; operations?: ToolOperation[];
 }
 export interface Conversation {
   id: string; userId: string; title: string; modelId: string; projectId: string | null;
@@ -13,7 +15,7 @@ export interface Conversation {
 export interface Project { id: string; userId: string; name: string; instructions: string }
 export interface Document { id: string; userId: string; name: string; content: string; size: number; projectId: string | null }
 export interface AppData {
-  version: 1; userId: string; conversations: Conversation[]; projects: Project[];
+  version: 2; userId: string; conversations: Conversation[]; projects: Project[];
   documents: Document[]; activeId: string | null; webSearch: boolean;
 }
 export const defaultPreferences: Preferences = { userId: USER_ID, theme: "dark", font: "times", accent: null };
@@ -22,9 +24,9 @@ export function newConversation(projectId: string | null = null, modelId = "-100
   return { id: id(), userId, title: "Nouvelle conversation", modelId, projectId, favorite: false, updatedAt: new Date().toISOString(), messages: [] };
 }
 export function initialData(userId = USER_ID): AppData {
-  if (userId !== USER_ID) return { version: 1, userId, conversations: [], projects: [], documents: [], activeId: null, webSearch: false };
+  if (userId !== USER_ID) return { version: 2, userId, conversations: [], projects: [], documents: [], activeId: null, webSearch: false };
   return {
-    version: 1, userId: USER_ID, activeId: "welcome", webSearch: false,
+    version: 2, userId: USER_ID, activeId: "welcome", webSearch: false,
     projects: [{ id: "memoire", userId: USER_ID, name: "Mon mémoire", instructions: "M’aider à rédiger et structurer mon mémoire, avec un style académique clair et rigoureux." }],
     documents: [{ id: "notes", userId: USER_ID, name: "notes.md", size: 135, projectId: "memoire", content: "# Notes de recherche\n\nSujet : les usages du numérique dans l’apprentissage.\n\nÀ explorer : autonomie, méthodes et accès aux connaissances." }],
     conversations: [{
