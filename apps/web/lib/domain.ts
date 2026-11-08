@@ -18,10 +18,11 @@ export interface AppData {
 }
 export const defaultPreferences: Preferences = { userId: USER_ID, theme: "dark", font: "times", accent: null };
 export const id = () => crypto.randomUUID();
-export function newConversation(projectId: string | null = null, modelId = "-1002"): Conversation {
-  return { id: id(), userId: USER_ID, title: "Nouvelle conversation", modelId, projectId, favorite: false, updatedAt: new Date().toISOString(), messages: [] };
+export function newConversation(projectId: string | null = null, modelId = "-1002", userId = USER_ID): Conversation {
+  return { id: id(), userId, title: "Nouvelle conversation", modelId, projectId, favorite: false, updatedAt: new Date().toISOString(), messages: [] };
 }
-export function initialData(): AppData {
+export function initialData(userId = USER_ID): AppData {
+  if (userId !== USER_ID) return { version: 1, userId, conversations: [], projects: [], documents: [], activeId: null, webSearch: false };
   return {
     version: 1, userId: USER_ID, activeId: "welcome", webSearch: false,
     projects: [{ id: "memoire", userId: USER_ID, name: "Mon mémoire", instructions: "M’aider à rédiger et structurer mon mémoire, avec un style académique clair et rigoureux." }],
