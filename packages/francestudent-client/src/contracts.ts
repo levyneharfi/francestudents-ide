@@ -12,6 +12,6 @@ export interface AIRequest {
 }
 export interface AIProvider {
   readonly capabilities: AICapabilities;
-  listModels(): readonly AIModel[];
+  listModels(): readonly AIModel[] | Promise<readonly AIModel[]>;
   stream(request: AIRequest, options: { signal: AbortSignal }): AsyncIterable<string>;
 }
