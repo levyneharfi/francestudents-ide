@@ -32,7 +32,7 @@ Les modalités d'accès autorisées à FranceStudent doivent être confirmées a
 
 Les documents importés sont des données non fiables, distinctes des instructions du projet. Le lecteur affiche du texte brut, y compris le Markdown ; pas de HTML injecté. La protection d'accès de Sites protège l'URL ; la persistance de la démonstration reste dans le navigateur.
 
-La création du fork GitHub est bloquée dans l'environnement initial par une connexion GitHub invalide et une requête de fork refusée. Le code conserve l'historique original localement. Ne pas présenter le fork distant comme créé avant vérification.
+Le fork https://github.com/levyneharfi/francestudents-ide a été créé par le propriétaire et vérifié. La branche feat/francestudent-web-v1 contient le commit e548d34. L’authentification du CLI GitHub de l’environnement reste invalide ; utiliser le connecteur GitHub autorisé ou la procédure de transfert Git, sans exposer de secret.
 
 ## Exécution
 
@@ -48,3 +48,11 @@ npm --prefix apps/web run test:e2e
 ```
 
 Le build produit `apps/web/out` et copie l'export dans `out` à la racine pour l'hébergement statique. Voir `docs/web/ARCHITECTURE.md`, `AUDIT.md`, `IMPLEMENTATION_PLAN.md` et `VERIFICATION.md`.
+
+## Connexion locale réelle — étape suivante autorisée
+
+À la demande explicite de l'utilisateur, prioriser la connexion réelle avant PostgreSQL. Le fichier OpenAPI fourni est conservé dans docs/web/francestudent-openapi.json. Le mode local connecté utilise un serveur Node.js avec une authentification propre, un adaptateur FranceStudent à état isolé, un catalogue réel et du SSE réseau. Aucun repli silencieux sur le mock. Le parcours terminal de connexion existant est réutilisé ; les secrets ne sont jamais saisis dans notre interface web.
+
+L'historique reste dans le navigateur, sous un identifiant local distinct de demo-local ; les correspondances FranceStudent sont persistées dans le dossier privé du compte OS. Un changement de contexte ou une nouvelle tentative explicite peut créer un nouveau chat distant. L'aperçu Sites reste statique et simulé. Cette livraison ne prétend pas activer le multi-utilisateur ni PostgreSQL.
+
+Voir docs/web/LOCAL_CONNECTION.md pour l'installation Mac et les limites de validation. Le protocole est testé hors ligne ; le test authentifié avec le compte du propriétaire doit se faire sur son Mac, car l'environnement cloud n'a pas accès au domaine FranceStudent et ne possède aucun secret de compte.
