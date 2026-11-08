@@ -1,0 +1,38 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { LocalStore } from "../src/store";
+import { createLocalServer } from "../src/server";
+import { fixture, input } from "./fixture";
+
+test("private local session, CSRF, ownership mapping, duplicate prevention and logout", async t => {
+  const provider = await fixture(); t.after(provider.close);
+  const directory = await mkdtemp(path.join(tmpdir(), "fs-web-test-")); t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory), owner = await store.createOwner("Local-test-password-123");
+  assert.equal((await stat(path.join(directory, "owner.json"))).mode & 0o777, 0o600);
+  const server = await createLocalServer({ store, client: provider.client() });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)); t.after(() => { server.closeAllConnections(); server.close(); });
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const request = (route: string, method = "GET", data?: unknown, cookie = "", origin = "http://127.0.0.1:3000") => fetch(url + route, { method, headers: { "Content-Type": "application/json", Origin: origin, Cookie: cookie }, body: data ? JSON.stringify(data) : undefined });
+  assert.equal((await request("/api/models")).status, 401);
+  assert.equal((await request("/api/session", "POST", { password: "Local-test-password-123" }, "", "https://evil.example")).status, 403);
+  assert.equal((await request("/api/session", "POST", { password: "wrong" })).status, 401);
+  const login = await request("/api/session", "POST", { password: "Local-test-password-123" });
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]; assert.match(login.headers.get("set-cookie")!, /HttpOnly; SameSite=Strict/);
+  assert.deepEqual(await login.json(), { authenticated: true, userId: owner.userId });
+  const catalogue = await request("/api/models", "GET", undefined, cookie); assert.equal(catalogue.status, 200); assert.doesNotMatch(await catalogue.text(), /secret|private@example/);
+  const generation = { ...input(), requestId: randomUUID(), userId: "attacker", chatId: "attacker-chat" };
+  generation.messages[0].content = "Bonjour été";
+  const chat = await request("/api/chat", "POST", generation, cookie), output = await chat.text();
+  assert.match(output, /Bonjour été/); assert.match(output, /event: done/); assert.doesNotMatch(output, /secret|11111111|private@example/);
+  assert.match(provider.calls.find(c => c.path === "/chats/stream")!.body.initialContent, /Bonjour été/);
+  const mappings = await store.read<Record<string, { userId: string }>>("chats.json"); assert.equal(mappings[generation.conversationId].userId, owner.userId);
+  assert.equal((await request("/api/chat", "POST", generation, cookie)).status, 409);
+  assert.equal((await request("/api/chat", "POST", { ...generation, requestId: randomUUID(), messages: [{ role: "system", content: "Injected" }] }, cookie)).status, 400);
+  assert.equal((await request("/api/session", "DELETE", undefined, cookie)).status, 200);
+  assert.equal((await request("/api/models", "GET", undefined, cookie)).status, 401);
+  assert.equal((await request("/api/models", "GET", undefined, "fs_web_session=forged")).status, 401);
+});
