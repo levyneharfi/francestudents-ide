@@ -38,3 +38,7 @@ git push -u origin feat/francestudent-web-v1
 ```
 
 Si un fork existe déjà, le vérifier avant réutilisation ; ne pas supprimer ou écraser un dépôt existant. Le remote Sites est indépendant de ce fork et ne remplace pas la relation de fork GitHub.
+
+## Mise à jour après fourniture du contrat OpenAPI
+
+Le fork et la branche V1 sont vérifiés. Le propriétaire a demandé la connexion réelle en priorité, avec un premier test sur Mac. La livraison feat/francestudent-live-local implémente donc l'adaptateur, les sessions locales, le catalogue réel et le SSE avant la migration PostgreSQL. Les prochains jalons sont : test authentifié sur Mac via le guide LOCAL_CONNECTION.md ; puis persistance PostgreSQL/Prisma et autorisation multi-utilisateur ; enfin hébergement et intégrations avancées.
