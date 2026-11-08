@@ -44,3 +44,6 @@ test-results/
 playwright-report/
 !apps/web/package-lock.json
 *.tsbuildinfo
+!apps/server/package-lock.json
+.francestudent-web/
+artifacts/web-connected/
