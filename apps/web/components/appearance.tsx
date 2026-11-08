@@ -28,6 +28,6 @@ export function Appearance({ preferences: p, onChange, onClose }: { preferences:
       <p className="field-note">Sans accentuation, seul le contraste souligne les états actifs.</p>
     </section>
     <section className="appearance-preview" aria-label="Aperçu de l’apparence"><span className="eyebrow">VOTRE ESPACE, EN APERÇU</span><h3>Place à vos idées.</h3><p>Une question, une intuition, un nouveau chapitre.</p><button className="accent-button" onClick={onClose}>Retrouver ma conversation <span aria-hidden>↗</span></button></section>
-    <footer className="settings-footer"><span className="muted">Enregistré automatiquement sur cet appareil</span><button className="text-button" onClick={() => onChange({ ...defaultPreferences })}><RotateCcw size={14} />Réinitialiser</button></footer>
+    <footer className="settings-footer"><span className="muted">Enregistré automatiquement sur cet appareil</span><button className="text-button" onClick={() => onChange({ ...defaultPreferences, userId: p.userId })}><RotateCcw size={14} />Réinitialiser</button></footer>
   </Modal>;
 }
